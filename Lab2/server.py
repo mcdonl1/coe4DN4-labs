@@ -13,6 +13,7 @@ import csv
 CSV_FILE_NAME = "course_grades_2021.csv"
 
 class Server:
+
     # Command string consts
     GET_MIDTERM_AVG_CMD = "GMA"
     GET_LAB_1_AVG_CMD = "GLA1"
@@ -21,8 +22,13 @@ class Server:
     GET_LAB_4_AVG_CMD = "GLA4"
 
     MAX_CONNECTION_BACKLOG = 10
+    RECV_BUFFER_SIZE = 1024
+
+    MSG_ENCODING = "utf-8"
 
     def __init__(self, ip_address='localhost', port=1234, file_name=CSV_FILE_NAME):
+        # Set up and run server
+
         # Add students
         self.students = {}
         self.averages = {}
@@ -31,6 +37,9 @@ class Server:
         # Socket init
         self.address = (ip_address, port)
         self.socket_setup()
+
+        # Handle connections
+        self.handle_connections_forever()
 
     def read_csv(self, file_name):
         # Read csv at file_name and add students and averages to server instance
@@ -60,6 +69,7 @@ class Server:
                         if self.averages.get(assignment) != None:
                             print(f"Replacing average for assignment {assignment}.") 
                         self.averages[assignment] = average
+
     def socket_setup(self):
         # Init socket and start listening for commands
         try:
@@ -75,11 +85,73 @@ class Server:
             print(e)
             sys.exit(1)
 
+    def handle_connections_forever(self):
+        try:
+            while True:
+                # Block waiting for incoming connection, then any connections to connection handler function
+                self.handle_connection(self.socket.accept())
+        except Exception as e:
+            print(e)
+        except KeyboardInterrupt:
+            print("Manually interupted while handling connections indefinitely. Server shutting down.")
+        finally:
+            # Clean up and end program
+            self.socket.close()
+            sys.exit(1)
         
-    
-    def handle_command(self, cmd):
+    def handle_connection(self, client):
         # Recieve command and return required information
-        pass
+        conn, address_port = client
+        print("-" * 72)
+        print(f"Connection received from {address_port}")
+
+        while True:
+            try:
+                recvd_bytes = conn.recv(Server.RECV_BUFFER_SIZE)
+                # Handle closed connections
+                if len(recvd_bytes) == 0:
+                    print(f"Closing client connection from: {address_port}...")
+                    conn.close()
+                    break
+
+                #Convert to string
+                recvd_string = recvd_bytes.decode(Server.MSG_ENCODING)
+                # Pass to command handler
+                response = self.handle_command(recvd_string)
+                
+                # Send response
+                if repsonse != None:
+                    sent_bytes = conn.sendall(response.encode("utf-8"))
+                else:
+                    # Invalid command, send message to client
+                    sent_bytes = conn.sendall("Invalid command. Please try again.".encode("utf-8"))
+                    
+            except KeyboardInterrupt:
+                print()
+                print(f"Closing client connection from: {address_port}...")
+                conn.close()
+                break
+        
+    def handle_command(self, cmd_string):
+        print(f"Processing command {cmd_string}.")
+        try:
+            if cmd_string == Server.GET_MIDTERM_AVG_CMD:
+                return self.averages["Midterm"]
+            elif cmd_string == Server.GET_LAB_1_AVG_CMD:
+                return self.averages["Lab 1"]
+            elif cmd_string == Server.GET_LAB_2_AVG_CMD:
+                return self.averages["Lab 2"]
+            elif cmd_string == Server.GET_LAB_3_AVG_CMD:
+                return self.averages["Lab 3"]
+            elif cmd_string == Server.GET_LAB_4_AVG_CMD:
+                return self.averages["Lab 4"]
+            else:
+                # Treat as auth request
+                pass
+        except Exception as e:
+            print(f'Exception handling command "{cmd_string}": {e}')
+            return "Server error while handling command."
+
 
 class Student:
     def __init__(self, id, password, lastname, firstname, grades):
