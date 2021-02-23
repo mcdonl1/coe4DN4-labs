@@ -10,6 +10,7 @@ import socket
 import sys
 import csv
 import hashlib
+import json
 
 CSV_FILE_NAME = "course_grades_2021.csv"
 
@@ -46,14 +47,19 @@ class Server:
         # Read csv at file_name and add students and averages to server instance
         with open(file_name, "r") as f:
             csv_reader = csv.reader(f, delimiter=",")
-
+            
             headers = next(csv_reader, None)
             assignments = headers[4:]
 
+            print("Data read from CSV file: ")
+            print(headers)
+
             if headers == None:
                 raise(Exception("No data in csv file."))
+            
 
             for row in csv_reader:
+                print(row)
                 # For each row, create a student object and add it to the serve
                 grades = row[4:]
                 if row[0] != "Averages":
@@ -80,7 +86,8 @@ class Server:
             self.socket.bind(self.address)
             # Start listening for connections
             self.socket.listen(Server.MAX_CONNECTION_BACKLOG)
-            print(f"Listening on port {self.address[1]}...")
+            print("-" * 72)
+            print(f"Listening for connections on port {self.address[1]}...")
         except Exception as e:
             # Handle any exceptions by printing exception and exiting program
             print(e)
@@ -114,43 +121,54 @@ class Server:
                     print(f"Closing client connection from: {address_port}...")
                     conn.close()
                     break
-
                 #Convert to string
-                recvd_string = recvd_bytes.decode(Server.MSG_ENCODING)
+                try:
+                    recvd_string = recvd_bytes.decode()
+                except Exception as e:
+                    # Can't decode hash => Auth request
+                    recvd_string = recvd_bytes
+
                 # Pass to command handler
                 response = self.handle_command(recvd_string)
                 
                 # Send response
-                if repsonse != None:
-                    sent_bytes = conn.sendall(response.encode("utf-8"))
+                if response != None:
+                    sent_bytes = conn.sendall(response.encode(Server.MSG_ENCODING))
                 else:
                     # Invalid command, send message to client
-                    sent_bytes = conn.sendall("Invalid command. Please try again.".encode("utf-8"))
+                    sent_bytes = conn.sendall("Invalid command. Please try again.".encode(Server.MSG_ENCODING))
 
             except KeyboardInterrupt:
                 print()
                 print(f"Closing client connection from: {address_port}...")
                 conn.close()
                 break
+            except Exception as e:
+                print(f"Error during connection: {e}")
         
     def handle_command(self, cmd_string):
-        print(f"Processing command {cmd_string}.")
         try:
-            if cmd_string == Server.GET_MIDTERM_AVG_CMD:
+            if cmd_string.upper() == Server.GET_MIDTERM_AVG_CMD:
+                print(f"Received {Server.GET_MIDTERM_AVG_CMD} command from client")
                 return self.averages["Midterm"]
-            elif cmd_string == Server.GET_LAB_1_AVG_CMD:
+            elif cmd_string.upper() == Server.GET_LAB_1_AVG_CMD:
+                print(f"Received {Server.GET_LAB_1_AVG_CMD} command from client")
                 return self.averages["Lab 1"]
-            elif cmd_string == Server.GET_LAB_2_AVG_CMD:
+            elif cmd_string.upper() == Server.GET_LAB_2_AVG_CMD:
+                print(f"Received {Server.GET_LAB_2_AVG_CMD} command from client")
                 return self.averages["Lab 2"]
-            elif cmd_string == Server.GET_LAB_3_AVG_CMD:
+            elif cmd_string.upper() == Server.GET_LAB_3_AVG_CMD:
+                print(f"Received {Server.GET_LAB_3_AVG_CMD} command from client")
                 return self.averages["Lab 3"]
-            elif cmd_string == Server.GET_LAB_4_AVG_CMD:
+            elif cmd_string.upper() == Server.GET_LAB_4_AVG_CMD:
+                print(f"Received {Server.GET_LAB_4_AVG_CMD} command from client")
                 return self.averages["Lab 4"]
             else:
+                print(f"Received ID/password hash {cmd_string} from client.")
                 try:
-                    student_id = handle_auth(cmd_string.encode("utf-8"))
+                    student_id = self.handle_auth(cmd_string)
                     if student_id != None:
-                        return self.students[student_id]
+                        return json.dumps(self.students[student_id].grades)
                     else:
                         return "Invalid student ID or password. Please try again."
                 except AuthError as e:
@@ -165,7 +183,9 @@ class Server:
             # Return student corresponding to hash provided, or None if no student found
             for student in self.students.values():
                 if student.get_password_hash() == hash:
+                    print("Correct password, record found.")
                     return student.id
+            print("Password failure.")
             return None
         except Exception as e:
             raise(AuthError("An error occured while authenticating user."))
