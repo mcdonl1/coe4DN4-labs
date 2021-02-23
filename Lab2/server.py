@@ -9,6 +9,7 @@ i.e. "python server.py" OR "python server.py ip port filename"
 import socket
 import sys
 import csv
+import hashlib
 
 CSV_FILE_NAME = "course_grades_2021.csv"
 
@@ -125,7 +126,7 @@ class Server:
                 else:
                     # Invalid command, send message to client
                     sent_bytes = conn.sendall("Invalid command. Please try again.".encode("utf-8"))
-                    
+
             except KeyboardInterrupt:
                 print()
                 print(f"Closing client connection from: {address_port}...")
@@ -146,20 +147,57 @@ class Server:
             elif cmd_string == Server.GET_LAB_4_AVG_CMD:
                 return self.averages["Lab 4"]
             else:
-                # Treat as auth request
-                pass
+                try:
+                    student_id = handle_auth(cmd_string.encode("utf-8"))
+                    if student_id != None:
+                        return self.students[student_id]
+                    else:
+                        return "Invalid student ID or password. Please try again."
+                except AuthError as e:
+                    print(e.message)
+                    raise(e)
         except Exception as e:
             print(f'Exception handling command "{cmd_string}": {e}')
             return "Server error while handling command."
 
+    def handle_auth(self, hash):
+        try:
+            # Return student corresponding to hash provided, or None if no student found
+            for student in self.students.values():
+                if student.get_password_hash() == hash:
+                    return student.id
+            return None
+        except Exception as e:
+            raise(AuthError("An error occured while authenticating user."))
 
 class Student:
     def __init__(self, id, password, lastname, firstname, grades):
         self.id = id
-        self.password = password
         self.lastname = lastname
         self.firstname = firstname
         self.grades = grades
+        self.password_hash = _get_hash(id, password)
+
+    def get_password_hash(self):
+        return self.password_hash
+
+class Error(Exception):
+    pass
+
+class AuthError(Error):
+    def __init__(self, message):
+        self.message = message
+
+
+# Util functions
+
+def _get_hash(id, password):
+        h = hashlib.sha256() # Create sha256 hash object
+        # Update object with id and password
+        h.update(id.encode("utf-8")) 
+        h.update(password.encode("utf-8"))
+        # return the hash
+        return h.digest()
 
 HELPTEXT = "\nThis command can be run to create an IPv4 TCP server. The IP address, port number and\
 csv file location can be provided as command line arguments, in that order.\n"
