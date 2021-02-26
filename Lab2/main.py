@@ -2,6 +2,8 @@
 main.py
 
 A socket API client and server to fulfill the requirements detailed in the lab description pdf file.
+
+Run `python main.py runserver` for server or `python main.py runclient` for client
 """
 import socket
 import sys
