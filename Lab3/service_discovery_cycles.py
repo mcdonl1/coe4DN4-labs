@@ -54,7 +54,7 @@ class Client:
 
             # Set the socket for a socket.timeout if a scanning recv
             # fails.
-            self.socket.settimeout(Client.SCAN_TIMEOUT);
+            self.socket.settimeout(Client.SCAN_TIMEOUT)
         except Exception as msg:
             print(msg)
             sys.exit(1)
