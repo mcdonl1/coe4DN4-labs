@@ -34,6 +34,7 @@ from service_discovery_cycles import Client as DiscoveryClient
 CMD_FIELD_LEN = 1 # 1 byte commands sent from the client.
 FILE_SIZE_FIELD_LEN  = 8 # 8 byte file size field.
 FILE_NAME_FIELD_LEN = 127
+PACKET_SIZE_FIELD_LEN = 8
 
 # Packet format when a GET command is sent from a client, asking for a
 # file download:
@@ -80,7 +81,14 @@ class Server:
 
         
         self.create_listen_socket()
+
+        print("-" * 72)
+        print("Files available in shared directory:\n")
+
+        for item in os.listdir(Server.DIR_NAME):
+            print(item)
         self.process_connections_forever()
+        
 
     def create_discovery_server(self):
         self.discovery_server = DiscoveryServer()
@@ -92,7 +100,7 @@ class Server:
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.socket.bind((Server.HOSTNAME, Server.PORT))
             self.socket.listen(Server.BACKLOG)
-            print("Listening on port {} ...".format(Server.PORT))
+            print("Listening on for file sharing connections on port {} ...".format(Server.PORT))
         except Exception as msg:
             print(msg)
             exit()
@@ -100,7 +108,7 @@ class Server:
     def process_connections_forever(self):
         try:
             while True:
-                self.connection_handler(self.socket.accept())
+                threading.Thread(target=self.connection_handler(self.socket.accept())).start()
         except KeyboardInterrupt:
             print()
         finally:
@@ -109,40 +117,40 @@ class Server:
     def connection_handler(self, client):
         connection, address = client
         print("-" * 72)
-        print("Connection received from {}.".format(address))
+        print(f"Connection received from {address[0]} on port {address[1]}.")
 
-        # Read the command and see if it is a GET.
-        cmd = int.from_bytes(connection.recv(CMD_FIELD_LEN), byteorder='big')
-        
-    
-        # The command is good. Now read and decode the requested
-        # filename.
-        
-        
+        while True:
+            recvd = connection.recv(CMD_FIELD_LEN)
+            if len(recvd) == 0:
+                print("Connection closed by client.")
+                connection.close()
+                return
 
-        if cmd == CMD["GET"]:
-            recv_bytes = connection.recv(Server.RECV_SIZE)
-            recv_string = recv_bytes.decode(MSG_ENCODING)
-            pkt = self.handle_get_cmd(recv_string, connection)
-        elif cmd == CMD["RLIST"]:
-            print("Received rlist command.")
-            pkt = self.handle_list_cmd()
-        elif cmd == CMD["PUT"]:
-            recv_bytes = connection.recv(Server.RECV_SIZE)
-            pkt = self.handle_put_cmd(recv_bytes, conn)
-
-        
-        try:
-            # Send the packet to the connected client.
-            connection.sendall(pkt)
-            # print("Sent packet bytes: \n", pkt)
+            cmd = int.from_bytes(recvd, byteorder='big')
             
-        except socket.error:
-            # If the client has closed the connection, close the
-            # socket on this end.
-            print("Closing client connection ...")
-            connection.close()
-            return
+            if cmd == CMD["GET"]:
+                recv_bytes = connection.recv(Server.RECV_SIZE)
+                recv_string = recv_bytes.decode(MSG_ENCODING)
+                pkt = self.handle_get_cmd(recv_string, connection)
+            elif cmd == CMD["RLIST"]:
+                print("Received rlist command.")
+                pkt = self.handle_list_cmd()
+            elif cmd == CMD["PUT"]:
+                recv_bytes = connection.recv(Server.RECV_SIZE)
+                pkt = self.handle_put_cmd(recv_bytes, conn)
+
+            
+            try:
+                # Send the packet to the connected client.
+                connection.sendall(pkt)
+                # print("Sent packet bytes: \n", pkt)
+                
+            except socket.error:
+                # If the client has closed the connection, close the
+                # socket on this end.
+                print("Closing client connection ...")
+                connection.close()
+                return
     
     def handle_get_cmd(self, filename, conn):
         # Open the requested file and get set to send it to the
@@ -198,7 +206,12 @@ class Server:
         for item in dir_contents:
             pkt_string += f"{item}\n"
 
-        return pkt_string.encode(MSG_ENCODING)
+        pkt_bytes = pkt_string.encode(MSG_ENCODING)
+
+        pkt_size_bytes = len(pkt_bytes)
+        pkt_size_field = pkt_size_bytes.to_bytes(PACKET_SIZE_FIELD_LEN, byteorder='big')
+
+        return pkt_size_field + pkt_bytes
 
 ########################################################################
 # CLIENT
@@ -214,8 +227,62 @@ class Client:
 
     def __init__(self):
         self.get_socket()
-        self.connect_to_server()
-        self.get_file("remotefile.txt", "remotetest.txt")
+        self.discovery_client = DiscoveryClient()
+        self.run()
+
+    def run(self):
+        while True:
+            cmd, args = self.get_input()
+            if cmd == CMD["PUT"]:
+                if len(args) >= 2:
+                    self.put_file(args[0], args[1])
+            elif cmd == CMD["GET"]:
+                if len(args) >= 2:
+                    self.get_file(args[0], args[1])
+            elif cmd == CMD["SCAN"]:
+                self.discovery_client.scan_for_service()
+            elif cmd == CMD["CONNECT"]:
+                if len(args) < 2:
+                    self.connect_to_server()
+                else:
+                    self.connect_to_server(args[0], args[1])
+            elif cmd == CMD["LLIST"]:
+                if len(args) < 1:
+                    self.get_local_list()
+                else:
+                    self.get_local_list(args[0])
+            elif cmd == CMD["RLIST"]:
+                self.get_remote_list()
+            elif cmd == CMD["BYE"]:
+                self.close_connection()
+                return
+    
+    def get_local_list(self, dir=None):
+        if dir == None:
+            dir = Client.DIR_NAME
+        contents = os.listdir(dir)
+        for entry in contents:
+            print(f"{entry}")
+
+    def get_input(self):
+        # Get user input and act
+        while True:
+            user_input = input("Enter a command: ")
+            args = user_input.split(" ")
+            if len(args) > 1:
+                user_input = args[0]
+                args = args[1:]
+            else:
+                args = []
+
+            if user_input == "quit":
+                return CMD["BYE"], args
+            user_input = user_input.upper()
+            for cmd_string, cmd_byte in CMD.items():
+                if user_input == cmd_string:
+                    return cmd_byte, args
+            
+            print("Invalid command, please try again.")
 
     def get_socket(self):
         try:
@@ -224,9 +291,10 @@ class Client:
             print(msg)
             exit()
 
-    def connect_to_server(self):
+    def connect_to_server(self, ip=Server.HOSTNAME, port=Server.PORT):
         try:
-            self.socket.connect((Server.HOSTNAME, Server.PORT))
+            self.socket.connect((ip, port))
+            print(f"Connected to server at {ip}:{port}")
         except Exception as msg:
             print(msg)
             exit()
@@ -255,8 +323,8 @@ class Client:
         # Read the file size field.
         file_size_bytes = self.socket_recv_size(FILE_SIZE_FIELD_LEN)
         if len(file_size_bytes) == 0:
-               self.socket.close()
-               return
+            self.socket.close()
+            return
 
         # Make sure that you interpret it in host byte order.
         file_size = int.from_bytes(file_size_bytes, byteorder='big')
@@ -283,20 +351,29 @@ class Client:
         except socket.error:
             self.socket.close()
     
-    def put_file(self, filename):
+    def put_file(self, local_filename, remote_filename):
         pass
-    def get_list(self):
+
+    def get_remote_list(self):
         # Helper function to test rlist command
         pkt = CMD["RLIST"].to_bytes(CMD_FIELD_LEN, byteorder='big')
         self.socket.sendall(pkt)
+        list_size_bytes = self.socket_recv_size(PACKET_SIZE_FIELD_LEN)
+        list_size = int.from_bytes(list_size_bytes, byteorder='big')
+        if len(list_size_bytes) == 0:
+            self.socket.close()
+            return
+
         recvd_bytes = bytearray()
-        recvd = self.socket.recv(Client.RECV_SIZE)
-        while(len(recvd) != 0):
-            recvd_bytes += recvd
-            recvd = self.socket.recv(Client.RECV_SIZE)
+        while(len(recvd_bytes) < list_size):
+            recvd_bytes += self.socket.recv(Client.RECV_SIZE)
 
         recvdstring = recvd_bytes.decode(MSG_ENCODING)
         print(recvdstring)
+    
+    def close_connection(self):
+        self.socket.close()
+        print("Closed connection.")
             
 ########################################################################
 

@@ -41,7 +41,6 @@ class Client:
 
     def __init__(self):
         self.get_socket()
-        self.scan_for_service()
 
     def get_socket(self):
         try:
