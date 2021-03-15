@@ -137,12 +137,12 @@ class Server:
                 pkt = self.handle_list_cmd()
             elif cmd == CMD["PUT"]:
                 recv_bytes = connection.recv(Server.RECV_SIZE)
-                pkt = self.handle_put_cmd(recv_bytes, conn)
+                pkt = self.handle_put_cmd(recv_bytes, connection)
 
-            
             try:
                 # Send the packet to the connected client.
-                connection.sendall(pkt)
+                if pkt != None:
+                    connection.sendall(pkt)
                 # print("Sent packet bytes: \n", pkt)
                 
             except socket.error:
@@ -175,9 +175,9 @@ class Server:
 
     def handle_put_cmd(self, filebytes, conn):
         # Extract information about file
-        filename = filebytes[:FILE_NAME_FIELD_LEN].decode(MSG_ENCODING)
-        file_size = int.from_bytes(filebytes[FILE_NAME_FIELD_LEN:FILE_SIZE_FIELD_LEN])
-        file_contents = bytearray(filebytes[FILE_SIZE_FIELD_LEN:])
+        filename = filebytes[:FILE_NAME_FIELD_LEN].decode(MSG_ENCODING).rstrip()
+        file_size = int.from_bytes(filebytes[FILE_NAME_FIELD_LEN:(FILE_NAME_FIELD_LEN + FILE_SIZE_FIELD_LEN)], byteorder="big")
+        file_contents = bytearray(filebytes[(FILE_NAME_FIELD_LEN + FILE_SIZE_FIELD_LEN):])
         
         while(len(file_contents) < file_size):
             # Recv until entire file is uploaded
@@ -225,6 +225,8 @@ class Client:
     # saved.
     DIR_NAME = "client_dir"
 
+    FILE_NOT_FOUND_MSG = "Error: Requested file is not available!"
+
     def __init__(self):
         self.get_socket()
         self.discovery_client = DiscoveryClient()
@@ -236,9 +238,13 @@ class Client:
             if cmd == CMD["PUT"]:
                 if len(args) >= 2:
                     self.put_file(args[0], args[1])
+                elif len(args) == 1:
+                    self.put_file(args[0])
             elif cmd == CMD["GET"]:
                 if len(args) >= 2:
                     self.get_file(args[0], args[1])
+                elif len(args) == 1:
+                    self.put_file(args[0])
             elif cmd == CMD["SCAN"]:
                 self.discovery_client.scan_for_service()
             elif cmd == CMD["CONNECT"]:
@@ -306,8 +312,10 @@ class Client:
             exit()
         return(bytes)
             
-    def get_file(self, remote_filename, local_filename):
+    def get_file(self, remote_filename, local_filename=None):
 
+        if local_filename == None:
+            local_filename = remote_filename
         # Create the packet GET field.
         get_field = CMD["GET"].to_bytes(CMD_FIELD_LEN, byteorder='big')
 
@@ -351,8 +359,32 @@ class Client:
         except socket.error:
             self.socket.close()
     
-    def put_file(self, local_filename, remote_filename):
-        pass
+    def put_file(self, local_filename, remote_filename=None):
+        # Adapted from server get method
+        if remote_filename == None:
+            remote_filename = local_filename
+        try:
+            with open(f"{Client.DIR_NAME}/{local_filename}", "r") as f:
+
+                # Encode the file contents into bytes, record its size and
+                # generate the file size field used for transmission.
+                file_bytes = f.read().encode(MSG_ENCODING)
+                file_size_bytes = len(file_bytes)
+                file_size_field = file_size_bytes.to_bytes(FILE_SIZE_FIELD_LEN, byteorder='big')
+
+                filename_field = remote_filename.ljust(FILE_NAME_FIELD_LEN).encode(MSG_ENCODING)
+                # Create the packet to be sent with the header field.
+                pkt = CMD["PUT"].to_bytes(CMD_FIELD_LEN, byteorder='big') + filename_field + file_size_field + file_bytes
+                
+                self.socket.sendall(pkt)
+
+                return None
+            
+        except FileNotFoundError:
+            print(Client.FILE_NOT_FOUND_MSG)            
+            return
+
+        
 
     def get_remote_list(self):
         # Helper function to test rlist command
@@ -382,7 +414,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     parser.add_argument('-r', '--role',
-                        choices=roles, 
+                        choices=roles,
                         help='server or client role',
                         required=True, type=str)
 

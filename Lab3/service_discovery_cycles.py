@@ -90,7 +90,7 @@ class Client:
         # Output all of our scan results, if any.
         if scan_results:
             for result in scan_results:
-                print(result)
+                print(f"{result[0]} found at IP address/port {result[1]}")
         else:
             print("No services found.")
                 

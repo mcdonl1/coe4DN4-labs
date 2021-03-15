@@ -52,9 +52,9 @@ class Server:
             sys.exit(1)
 
     def receive_forever(self):
+        print(Server.MSG, "listening for service discovery messages on the SDP port {} ...".format(Server.SERVICE_SCAN_PORT))
         while True:
             try:
-                print(Server.MSG, "listening for service discovery messages on the SDP port {} ...".format(Server.SERVICE_SCAN_PORT))
                 recvd_bytes, address = self.socket.recvfrom(Server.RECV_SIZE)
 
                 print("Received: ", recvd_bytes.decode('utf-8'), " Address:", address)
