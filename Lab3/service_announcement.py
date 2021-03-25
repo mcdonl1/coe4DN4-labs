@@ -27,7 +27,7 @@ class Server:
     SCAN_CMD = "SCAN"
     SCAN_CMD_ENCODED = SCAN_CMD.encode(MSG_ENCODING)
     
-    MSG = "My File Sharing Service"
+    MSG = "Lucas's File Sharing Service"
     MSG_ENCODED = MSG.encode(MSG_ENCODING)
 
     RECV_SIZE = 1024
@@ -52,9 +52,9 @@ class Server:
             sys.exit(1)
 
     def receive_forever(self):
+        print(Server.MSG, "listening for service discovery messages on the SDP port {} ...".format(Server.SERVICE_SCAN_PORT))
         while True:
             try:
-                print(Server.MSG, "listening on port {} ...".format(Server.SERVICE_SCAN_PORT))
                 recvd_bytes, address = self.socket.recvfrom(Server.RECV_SIZE)
 
                 print("Received: ", recvd_bytes.decode('utf-8'), " Address:", address)
