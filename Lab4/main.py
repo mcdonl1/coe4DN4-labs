@@ -1,11 +1,14 @@
 import socket
 import argparse
 import threading
+import time
 import random
 
 CMD = { "getdir": 1, "makeroom": 2, "deleteroom": 3}
 CMD_FIELD_LEN = 1 # 1 byte commands sent from the client.
+USER_FILED_LEN = 64
 ENCODING = "utf-8"
+RX_IFACE_ADDRESS = "0.0.0.0"
 
 class Server:
     
@@ -37,7 +40,7 @@ class Server:
     def process_connections_forever(self):
         try:
             while True:
-                threading.Thread(target=self.connection_handler(self.socket.accept())).start()
+                threading.Thread(target=self.connection_handler, args=(self.socket.accept(), )).start()
         except KeyboardInterrupt:
             print()
         finally:
@@ -119,79 +122,90 @@ class ChatRoom:
 
 class Client:
 
+    RECV_ADDRESS = ""
+    TTL = 1
     RECV_SIZE = 1024
     CLI_MODES = {"CRDS": 1, "CHAT": 2, "NC": 3}
     def __init__(self):
         self.username = f"User{random.randint(0, 100)}"
         self.get_socket()
         self.mode = Client.CLI_MODES["NC"]
+        self.chatroom = None
+        self.room_name = ""
         self.nc_prompt()
 
     def crds_prompt(self):
         while True:
-            self.user_input = input(f"[{self.username}, CRDS] Enter a command: ")
+            self.user_input = input(f"[{self.username}|CRDS] Enter a command: ")
             if self.handle_input() == None:
                 self.mode = Client.CLI_MODES["NC"]
                 break
 
     def nc_prompt(self):
         while True:
-            self.user_input = input(f"[{self.username}, local] Enter a command: ")
+            self.user_input = input(f"[{self.username}|local] Enter a command: ")
             if self.handle_input() == None:
                 break
 
     def handle_input(self):
         inputs = self.user_input.split()
-        cmd = inputs[0]
-        if (len(inputs) > 1):
-            args = inputs[1:]
+        if (len(inputs) > 0):
+            cmd = inputs[0]
+            if (len(inputs) > 1):
+                args = inputs[1:]
+            if (self.mode == Client.CLI_MODES["NC"]):
+                if (cmd.lower() == "q"):
+                    return None
+                elif(cmd.lower() == "connect"):
+                    if self.socket._closed:
+                        self.get_socket()
+                    self.connect_to_server()
+                    self.mode = Client.CLI_MODES["CRDS"]
+                    self.crds_prompt()
+                elif(cmd.lower() == "name"):
+                    self.set_name(args[0])
 
-        if (self.mode == Client.CLI_MODES["NC"]):
-            if (cmd.lower() == "q"):
-                return None
-            elif(cmd.lower() == "connect"):
-                self.connect_to_server()
-                self.mode = Client.CLI_MODES["CRDS"]
-                self.crds_prompt()
-            elif(cmd.lower() == "name"):
-                self.set_name(args[0])
-
-        elif (self.mode == Client.CLI_MODES["CRDS"]):
-            if (cmd.lower() == "bye"):
-                self.close_connection()
-                return None
-            elif (cmd.lower() == "getdir"):
-                self.handle_getdir_command()
-            elif (cmd.lower() == "makeroom"):
-                try:
-                    self.handle_makeroom_command(args[0], args[1], args[2])
-                except:
-                    print("Invalid arguments. Try agian.")
-            elif (cmd.lower() == "deleteroom"):
-                try:
-                    self.handle_deleteroom_command(args[0])
-                except:
-                    print("Invalid arguments. Try agian.")
-            elif (cmd.lower() == "chat"):
-                
-                rooms = self.handle_getdir_command(parse=True)
-                room = rooms.get(args[0])
-                if room != None:
-                    self.handle_chat(room)
+            elif (self.mode == Client.CLI_MODES["CRDS"]):
+                if (cmd.lower() == "bye"):
+                    self.close_connection()
+                    return None
+                elif (cmd.lower() == "getdir"):
+                    self.handle_getdir_command()
+                elif (cmd.lower() == "makeroom"):
+                    try:
+                        self.handle_makeroom_command(args[0], args[1], args[2])
+                    except:
+                        print("Invalid arguments. Try agian.")
+                elif (cmd.lower() == "deleteroom"):
+                    try:
+                        self.handle_deleteroom_command(args[0])
+                    except:
+                        print("Invalid arguments. Try agian.")
+                elif (cmd.lower() == "chat"):
+                    rooms = self.handle_getdir_command(parse=True)
+                    room = rooms.get(args[0])
+                    if room != None:
+                        self.room_name = args[0]
+                        self.handle_chat(room)
+                    else:
+                        print("Invalid room name. Please try again.")
                 else:
-                    print("Invalid room name. Please try again.")
-                
-            else:
-                print("Invalid command. Please try again.")
+                    print("Invalid command. Please try again.")
+            return True  
 
-        else:
-            #Handle chats
-            pass
-        return True  
-           
+    def chat_prompt(self, output_lock, room):
+        print(f"You have entered chat room {self.room_name}. Press CTRL + ] to return to main prompt.")
+        while True:
+            self.user_input = input(f"[{self.username}|{self.room_name}] Type a message and press enter to send.\n")
+            if self.user_input == "^q":
+                break
+            # build packet
+            name_field = self.username.ljust(USER_FILED_LEN).encode(ENCODING)
+            msg = self.user_input.encode(ENCODING)
 
-    def chat_prompt(self):
-        pass
+            pkt = name_field + msg
+
+            self.chat_send_socket.sendto(pkt, room)
 
     def get_socket(self):
         try:
@@ -250,7 +264,59 @@ class Client:
         self.socket.sendall(pkt)
 
     def handle_chat(self, room):
-        print(f"Handle chat: {room}")
+        self.chatroom = room
+        #print(f"Handle chat: {room}")
+        self.get_chat_sockets(room[0], room[1])
+        output_lock = threading.Lock()
+        run_recv_thread = threading.Event()
+        run_recv_thread.set()
+        
+        self.recv_thread = threading.Thread(target=self.chat_receive_thread, args=(output_lock, run_recv_thread))
+        self.recv_thread.daemon = True
+        self.recv_thread.start()
+        self.chat_prompt(output_lock, room)
+        run_recv_thread.clear()
+
+    def get_chat_sockets(self, multicast_ip, port):
+        try:
+            self.chat_recv_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.chat_recv_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
+            self.chat_recv_socket.bind((Client.RECV_ADDRESS, port))
+
+            multicast_group_bytes = socket.inet_aton(multicast_ip)
+            # Set up the interface to be used.
+            multicast_if_bytes = socket.inet_aton(RX_IFACE_ADDRESS)
+            # Form the multicast request.
+            multicast_request = multicast_group_bytes + multicast_if_bytes
+            # You can use struct.pack to create the request, but it is more complicated, e.g.,
+            # 'struct.pack("<4sl", multicast_group_bytes,
+            # int.from_bytes(multicast_if_bytes, byteorder='little'))'
+            # or 'struct.pack("<4sl", multicast_group_bytes, socket.INADDR_ANY)'
+
+            # Issue the Multicast IP Add Membership request.
+            #print("Adding membership (address/interface): ", MULTICAST_ADDRESS,"/", RX_IFACE_ADDRESS)
+            self.chat_recv_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, multicast_request)
+            print("5")
+        except Exception as e:
+            print(f"Error while getting chat recv socket; {e}")
+            exit()
+        try:
+            self.chat_send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.chat_send_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, Client.TTL)
+        except Exception as e:
+            print(f"Error while getting chat send socket; {e}")
+            exit()
+
+    def chat_receive_thread(self, output_lock, run_flag):
+        while run_flag.is_set():
+            data, address_port = self.chat_recv_socket.recvfrom(Client.RECV_SIZE)
+            data_str = data.decode(ENCODING)
+            author = data_str[:USER_FILED_LEN].rstrip()
+            if (author != self.username):
+                msg = data_str[USER_FILED_LEN:]
+                output_lock.acquire()
+                print(f"[{author}|{self.room_name}]: {msg}")
+                output_lock.release()
 
     def set_name(self, name):
         self.username = name
