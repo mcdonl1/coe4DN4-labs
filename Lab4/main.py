@@ -194,7 +194,7 @@ class Client:
             return True  
 
     def chat_prompt(self, output_lock, room):
-        print(f"You have entered chat room {self.room_name}. Press enter '^q' to return to main prompt.")
+        print(f"You have entered chat room {self.room_name}. Enter '^q' to return to main prompt.")
         print(f"[{self.username}|{self.room_name}] Type a message and press enter to send.\n")
         while True:
             self.user_input = input()
@@ -298,7 +298,6 @@ class Client:
             # Issue the Multicast IP Add Membership request.
             #print("Adding membership (address/interface): ", MULTICAST_ADDRESS,"/", RX_IFACE_ADDRESS)
             self.chat_recv_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, multicast_request)
-            print("5")
         except Exception as e:
             print(f"Error while getting chat recv socket; {e}")
             exit()
