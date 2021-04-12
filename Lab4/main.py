@@ -12,7 +12,7 @@ RX_IFACE_ADDRESS = "0.0.0.0"
 
 class Server:
     
-    HOSTNAME = "localhost"
+    HOSTNAME = "127.0.0.1"
 
     PORT = 30001
     RECV_SIZE = 1024
@@ -194,9 +194,11 @@ class Client:
             return True  
 
     def chat_prompt(self, output_lock, room):
-        print(f"You have entered chat room {self.room_name}. Press CTRL + ] to return to main prompt.")
+        print(f"You have entered chat room {self.room_name}. Press enter '^q' to return to main prompt.")
+        print(f"[{self.username}|{self.room_name}] Type a message and press enter to send.\n")
         while True:
-            self.user_input = input(f"[{self.username}|{self.room_name}] Type a message and press enter to send.\n")
+            self.user_input = input()
+            print(f"\033[A[you|{self.room_name}]: {self.user_input}")
             if self.user_input == "^q":
                 break
             # build packet
