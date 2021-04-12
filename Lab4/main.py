@@ -12,7 +12,7 @@ RX_IFACE_ADDRESS = "0.0.0.0"
 
 class Server:
     
-    HOSTNAME = "10.0.0.100"
+    HOSTNAME = "localhost"
 
     PORT = 30001
     RECV_SIZE = 1024
